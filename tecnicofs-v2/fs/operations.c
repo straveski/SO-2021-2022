@@ -180,5 +180,42 @@ ssize_t tfs_read(int fhandle, void *buffer, size_t len) {
 }
 
 int tfs_copy_to_external_fs(char const *source_path, char const *dest_path){
-    return 0;
+    int fdest,fsource,cnt;
+    char buffer[256];
+
+    fsource = tfs_open(source_path, TFS_O_APPEND);
+
+    if (fsource == 0){
+        perror(source_path);
+        return -1;
+    }
+    //cria o ficheiro ou substitui o conteudo
+    fdest = open(dest_path,TFS_O_CREAT|TFS_O_TRUNC);
+
+    if (fdest == 0){
+        perror(dest_path);
+        tfs_close(fsource);
+        return -1;
+    }
+
+    while((cnt = tfs_read(fsource,buffer,256)) > 0){
+        if (tfs_write(fdest,buffer,cnt) < cnt){
+            perror(dest_path);
+            tfs_close(fsource);
+            tfs_close(fdest);
+            return -1;
+        }
+    }
+
+    if(cnt<0){
+        perror(source_path);
+        tfs_close(fsource);
+        tfs_close(fdest);
+        return -1;
+    }
+
+    tfs_close(fsource);
+    tfs_close(fdest);
+
+    return 0; 
 }
