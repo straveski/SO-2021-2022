@@ -111,7 +111,10 @@ int inode_create(inode_type n_type) {
                 }
 
                 inode_table[inumber].i_size = BLOCK_SIZE;
-                inode_table[inumber].i_data_block = b;
+                inode_table[inumber].i_data_block[0] = b;
+                for(int i = 1; i < 10; i++) 
+                    inode_table[inumber].i_data_block[i] = -1;
+                inode_table[inumber].indirect_block = -1;
 
                 dir_entry_t *dir_entry = (dir_entry_t *)data_block_get(b);
                 if (dir_entry == NULL) {
@@ -119,13 +122,16 @@ int inode_create(inode_type n_type) {
                     return -1;
                 }
 
+                //mete todas as possiveis diretorias do bloco a -1
                 for (size_t i = 0; i < MAX_DIR_ENTRIES; i++) {
                     dir_entry[i].d_inumber = -1;
                 }
             } else {
                 /* In case of a new file, simply sets its size to 0 */
                 inode_table[inumber].i_size = 0;
-                inode_table[inumber].i_data_block = -1;
+                for(int i = 0; i < 10; i++) 
+                    inode_table[inumber].i_data_block[i] = -1;
+                inode_table[inumber].indirect_block = -1;
             }
             return inumber;
         }
@@ -151,11 +157,24 @@ int inode_delete(int inumber) {
     freeinode_ts[inumber] = FREE;
 
     if (inode_table[inumber].i_size > 0) {
-        if (data_block_free(inode_table[inumber].i_data_block) == -1) {
+        int free = 0;
+        for(int i = 0; i<10; i++){
+            if (data_block_free(inode_table[inumber].i_data_block[i]) != -1)
+                free = 1;
+        }
+        if (free == 0)
             return -1;
+    }
+    // vai buscar o numero do bloco indireto, depois vamos encontrar o ponteiro para esse bloco,
+    // dentro desse bloco vao estar os numeros dos blocos que o inode ocupa e vamos ter de dar free nesses blocos
+
+    if(inode_table[inumber].indirect_block != -1){
+        dir_entry_t *dir_entry = (int *) data_block_get(inode_table[inumber].indirect_block);
+        for (size_t i = 0; i < MAX_DIR_ENTRIES; i++) {
+            if(dir_entry[i].d_inumber == -1)
+                data_block_free(dir_entry[i].d_inumber);
         }
     }
-
     return 0;
 }
 
@@ -229,6 +248,8 @@ int find_in_dir(int inumber, char const *sub_name) {
         return -1;
     }
 
+    //PROVAVELMENTE ALTERAR
+    
     /* Locates the block containing the directory's entries */
     dir_entry_t *dir_entry =
         (dir_entry_t *)data_block_get(inode_table[inumber].i_data_block);
