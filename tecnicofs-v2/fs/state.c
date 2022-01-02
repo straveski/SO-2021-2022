@@ -167,15 +167,21 @@ int inode_delete(int inumber) {
     }
     // vai buscar o numero do bloco indireto, depois vamos encontrar o ponteiro para esse bloco,
     // dentro desse bloco vao estar os numeros dos blocos que o inode ocupa e vamos ter de dar free nesses blocos
-
+    
     if(inode_table[inumber].indirect_block != -1){
-        dir_entry_t *dir_entry = (int *) data_block_get(inode_table[inumber].indirect_block);
-        for (size_t i = 0; i < MAX_DIR_ENTRIES; i++) {
-            if(dir_entry[i].d_inumber == -1)
-                data_block_free(dir_entry[i].d_inumber);
-        }
+        int * p_ind_block = (int *) data_block_get(inode_table[inumber].indirect_block);
+        for(int *p_aux = p_ind_block; valid_block_number(*p_aux) != 1; p_aux += sizeof(int))
+            data_block_free(*p_aux);
     }
     return 0;
+
+    /*if(inode_table[inumber].indirect_block != -1){
+        dir_entry_t *dir_entry = (int *) data_block_get(inode_table[inumber].indirect_block);
+        for (size_t i = 0; i < MAX_DIR_ENTRIES; i++) {
+            if(dir_entry[i].d_inumber != -1)
+                data_block_free(dir_entry[i].d_inumber);
+        }
+    }*/
 }
 
 /*
@@ -217,7 +223,7 @@ int add_dir_entry(int inumber, int sub_inumber, char const *sub_name) {
 
     /* Locates the block containing the directory's entries */
     dir_entry_t *dir_entry =
-        (dir_entry_t *)data_block_get(inode_table[inumber].i_data_block);
+        (dir_entry_t *)data_block_get(inode_table[inumber].i_data_block[0]);
     if (dir_entry == NULL) {
         return -1;
     }
@@ -248,11 +254,9 @@ int find_in_dir(int inumber, char const *sub_name) {
         return -1;
     }
 
-    //PROVAVELMENTE ALTERAR
-    
     /* Locates the block containing the directory's entries */
     dir_entry_t *dir_entry =
-        (dir_entry_t *)data_block_get(inode_table[inumber].i_data_block);
+        (dir_entry_t *)data_block_get(inode_table[inumber].i_data_block[0]);
     if (dir_entry == NULL) {
         return -1;
     }
