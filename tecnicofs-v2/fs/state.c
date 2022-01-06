@@ -164,17 +164,16 @@ int inode_delete(int inumber) {
         }
         if (free == 0)
             return -1;
-    }
-    // vai buscar o numero do bloco indireto, depois vamos encontrar o ponteiro para esse bloco,
-    // dentro desse bloco vao estar os numeros dos blocos que o inode ocupa e vamos ter de dar free nesses blocos
-    
-    if(inode_table[inumber].indirect_block != -1){
-        int * p_ind_block = (int *) data_block_get(inode_table[inumber].indirect_block);
-        for(int *p_aux = p_ind_block; valid_block_number(*p_aux) != 1; p_aux += sizeof(int))
-            data_block_free(*p_aux);
+
+        // vai buscar o numero do bloco indireto, depois vamos encontrar o ponteiro para esse bloco,
+        // dentro desse bloco vao estar os numeros dos blocos que o inode ocupa e vamos ter de dar free nesses blocos
+        if(inode_table[inumber].indirect_block != -1){
+            int * p_ind_block = (int *) data_block_get(inode_table[inumber].indirect_block);
+            for(int *p_aux = p_ind_block; p_aux != NULL; p_aux += sizeof(int))
+                data_block_free(*p_aux);
+        }
     }
     return 0;
-
     /*if(inode_table[inumber].indirect_block != -1){
         dir_entry_t *dir_entry = (int *) data_block_get(inode_table[inumber].indirect_block);
         for (size_t i = 0; i < MAX_DIR_ENTRIES; i++) {
@@ -288,6 +287,61 @@ int data_block_alloc() {
         }
     }
     return -1;
+}
+
+int alloc_next_block(inode_t *inode){
+    //percorre os blocos diretos
+    for(int i = 0; i < 10; i++){
+        if (inode->i_data_block[i] == -1){
+            int b = data_block_alloc();
+            inode->i_data_block[i] = b;
+            return b;
+        }
+    }
+    //caso n haja diretos, vamos criar um indireto e preencher
+    if(inode->indirect_block == -1){
+        int b = data_block_alloc();
+        int c = data_block_alloc();
+        inode->indirect_block = b;
+        int *p_indirectblock = (int *)data_block_get(b);
+        if(p_indirectblock != NULL)
+            p_indirectblock[0] = c;
+        // preencher o bloco indireto com -1 excepto o primeiro
+        for(int i = 1 ; i < BLOCK_SIZE/sizeof(int); i += 1){
+            p_indirectblock[i] = -1;
+        }
+        return c;
+    }
+    //caso ja haja indireto vamos alocar um bloco la dentro
+    else{
+        int i_b = inode->indirect_block;
+        int *p_indirectblock = (int *)data_block_get(i_b);
+        int b = data_block_alloc();
+        for(int i = 0; i < BLOCK_SIZE/sizeof(int); i += 1){
+            if(p_indirectblock[i] == -1){
+                p_indirectblock[i] = b;
+                return b;
+            }
+        }
+        return -1;
+    }
+}
+
+int search_block_with_offset(inode_t *inode, size_t offset){
+    size_t n_blocks = offset/BLOCK_SIZE;
+    n_blocks++;
+    //diretos
+    if( n_blocks > 0 && n_blocks <= 10){
+        return inode->i_data_block[n_blocks-1];
+    }
+    else{
+        n_blocks = n_blocks - 10;
+        printf("%d\n", (int)n_blocks);
+        int *p_indirectblock = (int *)data_block_get(inode->indirect_block);
+        int block = *(p_indirectblock + (n_blocks-1));
+        printf("%d\n", block);
+        return block;
+    }
 }
 
 /* Frees a data block
