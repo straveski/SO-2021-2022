@@ -167,17 +167,17 @@ ssize_t tfs_write(int fhandle, void const *buffer, size_t to_write) {
 
                 //preencher o resto do bloco
                 if((int)resto - (int)current_write > 0){
-                    memcpy(p_block + block_offset, buffer + to_write - resto , current_write);
+                    memcpy(p_block + block_offset/sizeof(int), buffer + to_write - resto, current_write);
                     printf("EIA WHAT3\n");
-                    printf("%s\n", (char*)(p_block));
+                    printf("%s\n", (char*)(p_block + block_offset/sizeof(int)));
                 }
 
                 //so vamos preencher uma parte do bloco
                 else{
                     current_write = resto;
-                    memcpy(p_block + block_offset, buffer + to_write - resto , current_write);
+                    memcpy(p_block + block_offset/sizeof(int), buffer + to_write - resto, current_write);
                     printf("EIA WHAT2\n");
-                    printf("%s\n", (char*)(p_block));
+                    printf("%s\n", (char*)(p_block + block_offset/sizeof(int)));
                 }
                 file->of_offset += current_write;
 
@@ -203,12 +203,17 @@ ssize_t tfs_read(int fhandle, void *buffer, size_t len) {
     if (inode == NULL) {
         return -1;
     }
-
+    printf("%lu\n",len);
+    printf("%lu\n",inode->i_size);
+    printf("%lu\n",file->of_offset);
     /* Determine how many bytes to read */
     size_t to_read = inode->i_size - file->of_offset;
+    printf("%lu\n",to_read);
     if (to_read > len) {
         to_read = len;
     }
+    printf("%lu\n",to_read);
+
     size_t current_read;
     if (to_read > 0) {
         for(size_t resto = to_read; resto > 0; resto -= current_read){
@@ -216,7 +221,7 @@ ssize_t tfs_read(int fhandle, void *buffer, size_t len) {
 
             //ir buscar o bloco onde está o offset
             int current_block = search_block_with_offset(inode, file->of_offset);
-            printf("bloco %d\n", current_block);
+            //printf("bloco %d\n", current_block);
             int *block = (int *)data_block_get(current_block);
             if (block == NULL){
                 return -1;
@@ -226,8 +231,8 @@ ssize_t tfs_read(int fhandle, void *buffer, size_t len) {
                 printf("ACABA DE LER O BLOCO\n");
                 //quantidade de bytes que vamos ler no bloco
                 current_read = (size_t)BLOCK_SIZE - block_offset;
-                memcpy(buffer + to_read - resto, block + block_offset, current_read);
-                printf("%s\n", (char*)(block + block_offset));
+                memcpy(buffer + to_read - resto, block + block_offset/sizeof(int), current_read);
+                printf("%s\n", (char*)(block + block_offset/sizeof(int)));
                 printf("%s\n", (char*)(buffer + to_read - resto));
 
             }
@@ -235,8 +240,8 @@ ssize_t tfs_read(int fhandle, void *buffer, size_t len) {
             else{
                 printf("CONTINUA A LER O BLOCO\n");
                 current_read = resto;
-                memcpy(buffer+to_read-resto, block + block_offset, current_read);
-                printf("%s\n", (char*)(block + block_offset));
+                memcpy(buffer + to_read - resto, block + block_offset/sizeof(int), current_read);
+                printf("%s\n", (char*)(block + block_offset/sizeof(int)));
                 printf("%s\n", (char*)(buffer + to_read - resto));
             }
             //aumentamos o offset
@@ -246,44 +251,51 @@ ssize_t tfs_read(int fhandle, void *buffer, size_t len) {
     return (ssize_t)to_read;
 }
 
-/*
 int tfs_copy_to_external_fs(char const *source_path, char const *dest_path){
-    int fdest,fsource,cnt;
+    int fsource;
+    ssize_t cnt;
+    FILE *fdest;
     char buffer[256];
+    //verificar o sourcepath
+    if(!valid_pathname(source_path)) return -1;
 
-    fsource = tfs_open(source_path, TFS_O_APPEND);
+    fsource = tfs_open(source_path,0);
 
-    if (fsource == 0){
+    if (fsource == -1){
         perror(source_path);
         return -1;
     }
-    //cria o ficheiro ou substitui o conteudo
-    fdest = tfs_open(dest_path,TFS_O_CREAT|TFS_O_TRUNC);
 
-    if (fdest == 0){
+    //cria o ficheiro ou substitui o conteudo
+    fdest = fopen(dest_path,"w");
+
+    if (fdest == NULL){
         perror(dest_path);
         tfs_close(fsource);
         return -1;
     }
 
+    printf("%s\n",buffer);
     while((cnt = tfs_read(fsource,buffer,256)) > 0){
-        if (tfs_write(fdest,buffer,cnt) < cnt){
+        printf("FODA SE\n");
+        if (fwrite(buffer,sizeof(char),(size_t)cnt,fdest) < cnt){
+            printf("FODA SE2\n");
             perror(dest_path);
             tfs_close(fsource);
-            tfs_close(fdest);
+            fclose(fdest);
             return -1;
         }
     }
 
-    if(cnt<0){
+    if((int)cnt<0){
         perror(source_path);
         tfs_close(fsource);
-        tfs_close(fdest);
+        fclose(fdest);
         return -1;
     }
 
     tfs_close(fsource);
-    tfs_close(fdest);
+    fclose(fdest);
 
     return 0; 
-}*/
+}
