@@ -121,59 +121,73 @@ ssize_t tfs_write(int fhandle, void const *buffer, size_t to_write) {
         return -1;
     }
 
-    /* Determine how many bytes to write */
+    /* Determine how many bytes to write 
     if (to_write + file->of_offset > 10*BLOCK_SIZE + (BLOCK_SIZE/sizeof(int))*BLOCK_SIZE) {
         to_write = (10*BLOCK_SIZE + (BLOCK_SIZE/sizeof(int))*BLOCK_SIZE) - file->of_offset;
     }
+    */
     size_t current_write;
     if (to_write > 0) {
         for(size_t resto = to_write; resto > 0; resto -= current_write){
             //estamos no inicio ou acabamos um bloco
-            if(inode->i_size % BLOCK_SIZE == 0){
+            if(file->of_offset % BLOCK_SIZE == 0){
                 //alocar o proximo bloco
                 int block = alloc_next_block(inode);
-                void *p_block = data_block_get(block);
+                printf("WRITE BLOCK %d\n", block);
+                int *p_block = (int *)data_block_get(block);
+
                 //vamos preencher o bloco ate ao fim
-                if(resto - BLOCK_SIZE > 0){
-                    current_write = BLOCK_SIZE;
-                    memcpy(p_block, buffer + to_write - resto, current_write);
+                if((int)resto - BLOCK_SIZE > 0){
+                    current_write = (size_t)BLOCK_SIZE;
+                    memcpy((void *)p_block, buffer + to_write - resto , current_write);
                 }
                 //so vamos preencher uma parte do bloco e acaba
                 else{
                     current_write = resto;
-                    memcpy(p_block, buffer + to_write - resto, current_write);
+                    memcpy((void *)p_block, buffer + to_write - resto , current_write);
+                    printf("EIA WHAT1\n");
+                    printf("%s\n", (char*)(p_block));
                 }
+                file->of_offset += current_write;
             }
             //se estivermos a meio de um bloco
             else{
                 //procurar o bloco em que está o ficheiro
                 //buscar o ponteiro
-                //calcular onde estamos no bloco
-                size_t block_offset = inode->i_size % BLOCK_SIZE;
-                //ver o que ainda podemos escrever no bloco
-                current_write = BLOCK_SIZE - block_offset;
-                //preencher o resto do bloco
-                if(resto - current_write > 0){
-                    memcpy(p_block + block_offset, buffer + to_write - resto, current_write);
+                int current_block = search_block_with_offset(inode, file->of_offset);
+                int *p_block = (int *)data_block_get(current_block);
+                if (p_block == NULL){
+                    return -1;
                 }
+                //calcular onde estamos no bloco
+                size_t block_offset = file->of_offset % BLOCK_SIZE;
+                printf("%lu\n",block_offset);
+                //ver o que ainda podemos escrever no bloco
+                current_write = (size_t)BLOCK_SIZE - block_offset;
+
+                //preencher o resto do bloco
+                if((int)resto - (int)current_write > 0){
+                    memcpy((void*)p_block + block_offset, buffer + to_write - resto, current_write);
+                    printf("EIA WHAT3\n");
+                    printf("%s\n", (char*)((void*)p_block + block_offset));
+                }
+
                 //so vamos preencher uma parte do bloco
                 else{
                     current_write = resto;
-                    memcpy(p_block + block_offset, buffer + to_write - resto, current_write);
+                    memcpy((void*)p_block + block_offset, buffer + to_write - resto, current_write);
+                    printf("EIA WHAT2\n");
+                    printf("%s\n", (char*)((void*)p_block + block_offset));
                 }
-                
-            }
-            void *block = data_block_get(inode->i_data_block);
-            if (block == NULL) {
-                return -1;
+                file->of_offset += current_write;
+
             }
         }
-        /* The offset associated with the file handle is
-         * incremented accordingly */
-        file->of_offset += to_write;
+
         if (file->of_offset > inode->i_size) {
             inode->i_size = file->of_offset;
         }
+        printf("%lu\n",inode->i_size);
     }
     return (ssize_t)to_write;
 }
@@ -190,66 +204,91 @@ ssize_t tfs_read(int fhandle, void *buffer, size_t len) {
     if (inode == NULL) {
         return -1;
     }
-
     /* Determine how many bytes to read */
     size_t to_read = inode->i_size - file->of_offset;
+    printf("%lu\n",to_read);
     if (to_read > len) {
         to_read = len;
     }
+    printf("%lu\n",to_read);
 
+    size_t current_read;
     if (to_read > 0) {
-        void *block = data_block_get(inode->i_data_block);
-        if (block == NULL) {
-            return -1;
+        for(size_t resto = to_read; resto > 0; resto -= current_read){
+            size_t block_offset = file->of_offset % BLOCK_SIZE;
+
+            //ir buscar o bloco onde está o offset
+            int current_block = search_block_with_offset(inode, file->of_offset);
+            printf("bloco %d\n", current_block);
+            int *block = (int *)data_block_get(current_block);
+            if (block == NULL){
+                return -1;
+            }
+            //se o offset do bloco + o que queremos ler ultrapassar o tamanho de um bloco
+            if(block_offset + resto > BLOCK_SIZE){
+                printf("ACABA DE LER O BLOCO\n");
+                //quantidade de bytes que vamos ler no bloco
+                current_read = (size_t)BLOCK_SIZE - block_offset;
+                memcpy(buffer + to_read - resto,(void*)block + block_offset, current_read);
+
+            }
+            // se n ultrapassar o bloco significa que tudo oq vamos ler está nesse bloco
+            else{
+                current_read = resto;
+                memcpy(buffer + to_read - resto,(void*)block + block_offset, current_read);
+            }
+            //aumentamos o offset
+            file->of_offset += current_read;
         }
-
-        /* Perform the actual read */
-        memcpy(buffer, block + file->of_offset, to_read);
-        /* The offset associated with the file handle is
-         * incremented accordingly */
-        file->of_offset += to_read;
     }
-
     return (ssize_t)to_read;
 }
 
 int tfs_copy_to_external_fs(char const *source_path, char const *dest_path){
-    int fdest,fsource,cnt;
+    int fsource;
+    ssize_t cnt;
+    FILE *fdest;
     char buffer[256];
+    //verificar o sourcepath
+    if(!valid_pathname(source_path)) return -1;
 
-    fsource = tfs_open(source_path, TFS_O_APPEND);
+    fsource = tfs_open(source_path,0);
 
-    if (fsource == 0){
+    if (fsource == -1){
         perror(source_path);
         return -1;
     }
-    //cria o ficheiro ou substitui o conteudo
-    fdest = tfs_open(dest_path,TFS_O_CREAT|TFS_O_TRUNC);
 
-    if (fdest == 0){
+    //cria o ficheiro ou substitui o conteudo
+    fdest = fopen(dest_path,"w");
+
+    if (fdest == NULL){
         perror(dest_path);
         tfs_close(fsource);
         return -1;
     }
 
+    printf("%s\n",buffer);
     while((cnt = tfs_read(fsource,buffer,256)) > 0){
-        if (tfs_write(fdest,buffer,cnt) < cnt){
+        printf("FODA SE\n");
+        if (fwrite(buffer,sizeof(char),(size_t)cnt,fdest) < cnt){
+            printf("FODA SE2\n");
             perror(dest_path);
             tfs_close(fsource);
-            tfs_close(fdest);
+            fclose(fdest);
             return -1;
         }
     }
 
-    if(cnt<0){
+    if((int)cnt<0){
         perror(source_path);
         tfs_close(fsource);
-        tfs_close(fdest);
+        fclose(fdest);
         return -1;
     }
 
     tfs_close(fsource);
-    tfs_close(fdest);
+    fclose(fdest);
 
     return 0; 
 }
