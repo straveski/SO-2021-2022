@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
 
 int tfs_init() {
     state_init();
@@ -83,10 +84,16 @@ int tfs_open(char const *name, int flags) {
     } else if (flags & TFS_O_CREAT) {
         /* The file doesn't exist; the flags specify that it should be created*/
         /* Create inode */
+        //trinco para impedir 2 ficheiros com o mesmo nome serem criados
+        //tranca
+        if(tfs_lookup(name) != -1)
+            return -1;
+
         inum = inode_create(T_FILE);
         if (inum == -1) {
             return -1;
         }
+        //destranco
         /* Add entry in the root directory */
         if (add_dir_entry(ROOT_DIR_INUM, inum, name + 1) == -1) {
             inode_delete(inum);
@@ -134,17 +141,17 @@ ssize_t tfs_write(int fhandle, void const *buffer, size_t to_write) {
                 //alocar o proximo bloco
                 int block = alloc_next_block(inode);
                 printf("WRITE BLOCK %d\n", block);
-                void *p_block = data_block_get(block);
+                int *p_block = (int *)data_block_get(block);
 
                 //vamos preencher o bloco ate ao fim
                 if((int)resto - BLOCK_SIZE > 0){
                     current_write = (size_t)BLOCK_SIZE;
-                    memcpy(p_block, buffer + to_write - resto , current_write);
+                    memcpy((void *)p_block, buffer + to_write - resto , current_write);
                 }
                 //so vamos preencher uma parte do bloco e acaba
                 else{
                     current_write = resto;
-                    memcpy(p_block, buffer + to_write - resto , current_write);
+                    memcpy((void *)p_block, buffer + to_write - resto , current_write);
                     printf("EIA WHAT1\n");
                     printf("%s\n", (char*)(p_block));
                 }
@@ -167,17 +174,17 @@ ssize_t tfs_write(int fhandle, void const *buffer, size_t to_write) {
 
                 //preencher o resto do bloco
                 if((int)resto - (int)current_write > 0){
-                    memcpy(p_block + block_offset/sizeof(int), buffer + to_write - resto, current_write);
+                    memcpy((void*)p_block + block_offset, buffer + to_write - resto, current_write);
                     printf("EIA WHAT3\n");
-                    printf("%s\n", (char*)(p_block + block_offset/sizeof(int)));
+                    printf("%s\n", (char*)((void*)p_block + block_offset));
                 }
 
                 //so vamos preencher uma parte do bloco
                 else{
                     current_write = resto;
-                    memcpy(p_block + block_offset/sizeof(int), buffer + to_write - resto, current_write);
+                    memcpy((void*)p_block + block_offset, buffer + to_write - resto, current_write);
                     printf("EIA WHAT2\n");
-                    printf("%s\n", (char*)(p_block + block_offset/sizeof(int)));
+                    printf("%s\n", (char*)((void*)p_block + block_offset));
                 }
                 file->of_offset += current_write;
 
@@ -187,6 +194,7 @@ ssize_t tfs_write(int fhandle, void const *buffer, size_t to_write) {
         if (file->of_offset > inode->i_size) {
             inode->i_size = file->of_offset;
         }
+        printf("%lu\n",inode->i_size);
     }
     return (ssize_t)to_write;
 }
@@ -203,9 +211,6 @@ ssize_t tfs_read(int fhandle, void *buffer, size_t len) {
     if (inode == NULL) {
         return -1;
     }
-    printf("%lu\n",len);
-    printf("%lu\n",inode->i_size);
-    printf("%lu\n",file->of_offset);
     /* Determine how many bytes to read */
     size_t to_read = inode->i_size - file->of_offset;
     printf("%lu\n",to_read);
@@ -221,7 +226,7 @@ ssize_t tfs_read(int fhandle, void *buffer, size_t len) {
 
             //ir buscar o bloco onde está o offset
             int current_block = search_block_with_offset(inode, file->of_offset);
-            //printf("bloco %d\n", current_block);
+            printf("bloco %d\n", current_block);
             int *block = (int *)data_block_get(current_block);
             if (block == NULL){
                 return -1;
@@ -231,18 +236,13 @@ ssize_t tfs_read(int fhandle, void *buffer, size_t len) {
                 printf("ACABA DE LER O BLOCO\n");
                 //quantidade de bytes que vamos ler no bloco
                 current_read = (size_t)BLOCK_SIZE - block_offset;
-                memcpy(buffer + to_read - resto, block + block_offset/sizeof(int), current_read);
-                printf("%s\n", (char*)(block + block_offset/sizeof(int)));
-                printf("%s\n", (char*)(buffer + to_read - resto));
+                memcpy(buffer + to_read - resto,(void*)block + block_offset, current_read);
 
             }
             // se n ultrapassar o bloco significa que tudo oq vamos ler está nesse bloco
             else{
-                printf("CONTINUA A LER O BLOCO\n");
                 current_read = resto;
-                memcpy(buffer + to_read - resto, block + block_offset/sizeof(int), current_read);
-                printf("%s\n", (char*)(block + block_offset/sizeof(int)));
-                printf("%s\n", (char*)(buffer + to_read - resto));
+                memcpy(buffer + to_read - resto,(void*)block + block_offset, current_read);
             }
             //aumentamos o offset
             file->of_offset += current_read;
