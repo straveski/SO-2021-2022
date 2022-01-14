@@ -86,13 +86,13 @@ int tfs_open(char const *name, int flags) {
         /* Create inode */
         //trinco para impedir 2 ficheiros com o mesmo nome serem criados
         //tranca
-        if(tfs_lookup(name) != -1)
-            return -1;
+        /*if(tfs_lookup(name) != -1)
+            return -1;*/
 
         inum = inode_create(T_FILE);
-        if (inum == -1) {
+        /*if (inum == -1) {
             return -1;
-        }
+        }*/
         //destranco
         /* Add entry in the root directory */
         if (add_dir_entry(ROOT_DIR_INUM, inum, name + 1) == -1) {
@@ -118,21 +118,24 @@ int tfs_close(int fhandle) { return remove_from_open_file_table(fhandle); }
 
 ssize_t tfs_write(int fhandle, void const *buffer, size_t to_write) {
     open_file_entry_t *file = get_open_file_entry(fhandle);
+    pthread_mutex_lock(&file->ftrinco);
     if (file == NULL) {
+        pthread_mutex_unlock(&file->ftrinco);
         return -1;
     }
 
     /* From the open file table entry, we get the inode */
     inode_t *inode = inode_get(file->of_inumber);
     if (inode == NULL) {
+        pthread_mutex_unlock(&file->ftrinco);
         return -1;
     }
-
-    /* Determine how many bytes to write 
+    
+    /*Determine how many bytes to write 
     if (to_write + file->of_offset > 10*BLOCK_SIZE + (BLOCK_SIZE/sizeof(int))*BLOCK_SIZE) {
         to_write = (10*BLOCK_SIZE + (BLOCK_SIZE/sizeof(int))*BLOCK_SIZE) - file->of_offset;
-    }
-    */
+    }*/
+    pthread_rwlock_wrlock(&inode->itrinco);
     size_t current_write;
     if (to_write > 0) {
         for(size_t resto = to_write; resto > 0; resto -= current_write){
@@ -146,6 +149,7 @@ ssize_t tfs_write(int fhandle, void const *buffer, size_t to_write) {
                 //vamos preencher o bloco ate ao fim
                 if((int)resto - BLOCK_SIZE > 0){
                     current_write = (size_t)BLOCK_SIZE;
+                    printf("AAAA\n");
                     memcpy((void *)p_block, buffer + to_write - resto , current_write);
                 }
                 //so vamos preencher uma parte do bloco e acaba
@@ -164,6 +168,8 @@ ssize_t tfs_write(int fhandle, void const *buffer, size_t to_write) {
                 int current_block = search_block_with_offset(inode, file->of_offset);
                 int *p_block = (int *)data_block_get(current_block);
                 if (p_block == NULL){
+                    pthread_rwlock_unlock(&inode->itrinco);
+                    pthread_mutex_unlock(&file->ftrinco);
                     return -1;
                 }
                 //calcular onde estamos no bloco
@@ -196,29 +202,33 @@ ssize_t tfs_write(int fhandle, void const *buffer, size_t to_write) {
         }
         printf("%lu\n",inode->i_size);
     }
+    pthread_rwlock_unlock(&inode->itrinco);
+    pthread_mutex_unlock(&file->ftrinco);
     return (ssize_t)to_write;
 }
 
 
 ssize_t tfs_read(int fhandle, void *buffer, size_t len) {
     open_file_entry_t *file = get_open_file_entry(fhandle);
+    pthread_mutex_lock(&file->ftrinco);
     if (file == NULL) {
+        pthread_mutex_unlock(&file->ftrinco);
         return -1;
     }
 
     /* From the open file table entry, we get the inode */
     inode_t *inode = inode_get(file->of_inumber);
     if (inode == NULL) {
+        pthread_mutex_unlock(&file->ftrinco);
         return -1;
     }
     /* Determine how many bytes to read */
     size_t to_read = inode->i_size - file->of_offset;
-    printf("%lu\n",to_read);
     if (to_read > len) {
         to_read = len;
     }
-    printf("%lu\n",to_read);
 
+    pthread_rwlock_rdlock(&inode->itrinco);
     size_t current_read;
     if (to_read > 0) {
         for(size_t resto = to_read; resto > 0; resto -= current_read){
@@ -229,11 +239,12 @@ ssize_t tfs_read(int fhandle, void *buffer, size_t len) {
             printf("bloco %d\n", current_block);
             int *block = (int *)data_block_get(current_block);
             if (block == NULL){
+                pthread_rwlock_unlock(&inode->itrinco);
+                pthread_mutex_unlock(&file->ftrinco);
                 return -1;
             }
             //se o offset do bloco + o que queremos ler ultrapassar o tamanho de um bloco
             if(block_offset + resto > BLOCK_SIZE){
-                printf("ACABA DE LER O BLOCO\n");
                 //quantidade de bytes que vamos ler no bloco
                 current_read = (size_t)BLOCK_SIZE - block_offset;
                 memcpy(buffer + to_read - resto,(void*)block + block_offset, current_read);
@@ -248,6 +259,8 @@ ssize_t tfs_read(int fhandle, void *buffer, size_t len) {
             file->of_offset += current_read;
         }
     }
+    pthread_rwlock_wrlock(&inode->itrinco);
+    pthread_mutex_unlock(&file->ftrinco);
     return (ssize_t)to_read;
 }
 
